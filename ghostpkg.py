@@ -11,9 +11,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="ghostpkg",
-        description=(
-            "GhostPkg - secure Python package installer"
-        )
+        description="GhostPkg - secure Python package verification"
     )
 
     subparsers = parser.add_subparsers(
@@ -21,13 +19,13 @@ def main():
         required=True
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # INSTALL COMMAND
-    # --------------------------------------------------------
+    # ========================================================
 
     install_parser = subparsers.add_parser(
         "install",
-        help="Securely verify and test a Python package"
+        help="Verify and test a Python package"
     )
 
     install_parser.add_argument(
@@ -43,37 +41,36 @@ def main():
 
     if args.command == "install":
 
-        result = run_security_check(
-            args.package
-        )
+        package_name = args.package
 
         print("=" * 60)
         print("                    GHOSTPKG")
         print("=" * 60)
 
         print(
-            f"\n📦 Package: {args.package}"
+            f"\n📦 Package: {package_name}"
         )
 
-        # ----------------------------------------------------
-        # PYPI RESULT
-        # ----------------------------------------------------
+        # ====================================================
+        # RUN SECURITY PIPELINE
+        # ====================================================
+
+        result = run_security_check(
+            package_name
+        )
 
         verdict = result["verdict"]
 
-        print("\n🔍 PACKAGE VERIFICATION")
+        # ====================================================
+        # PYPI VERIFICATION
+        # ====================================================
+
+        print("\n🔍 PYPI VERIFICATION")
         print("-" * 40)
 
         if verdict["exists"] is True:
 
             print("PyPI:          EXISTS")
-
-            if verdict.get("closest_match"):
-
-                print(
-                    f"Similarity:    "
-                    f"'{verdict['closest_match']}'"
-                )
 
         elif verdict["exists"] is False:
 
@@ -83,9 +80,35 @@ def main():
 
             print("PyPI:          UNKNOWN")
 
-        # ----------------------------------------------------
+        print(
+            f"Reason:        {verdict['reason']}"
+        )
+
+        # ====================================================
+        # TOP-100 SUGGESTION
+        # ====================================================
+
+        if verdict.get("closest_match"):
+
+            print(
+                f"💡 Similar package: "
+                f"'{verdict['closest_match']}'"
+            )
+
+        # ====================================================
+        # FIRST PUBLISHED
+        # ====================================================
+
+        if verdict.get("created"):
+
+            print(
+                f"First published: "
+                f"{verdict['created']}"
+            )
+
+        # ====================================================
         # PYPI BLOCK
-        # ----------------------------------------------------
+        # ====================================================
 
         if result["stage"] == "pypi":
 
@@ -95,15 +118,14 @@ def main():
             print("🛑 PACKAGE BLOCKED")
 
             print(
-                f"\nReason: "
-                f"{verdict['reason']}"
+                f"\nReason: {result['message']}"
             )
 
             if verdict.get("closest_match"):
 
                 print(
-                    f"💡 Suggested package: "
-                    f"'{verdict['closest_match']}'"
+                    f"💡 Did you mean "
+                    f"'{verdict['closest_match']}'?"
                 )
 
             print(
@@ -114,32 +136,32 @@ def main():
 
             return 1
 
-        # ----------------------------------------------------
-        # DOCKER RESULT
-        # ----------------------------------------------------
+        # ====================================================
+        # DOCKER DETONATION
+        # ====================================================
 
         sandbox = result.get("sandbox")
 
         print("\n🧪 DETONATION CHAMBER")
         print("-" * 40)
 
-        print(
-            "Docker:        ENTERED"
-        )
+        print("Docker:        ENTERED")
 
-        print(
-            f"Status:        "
-            f"{sandbox['status']}"
-        )
+        if sandbox:
 
-        print(
-            f"Exit code:     "
-            f"{sandbox['exit_code']}"
-        )
+            print(
+                f"Status:        "
+                f"{sandbox['status']}"
+            )
 
-        # ----------------------------------------------------
-        # DOCKER BLOCK
-        # ----------------------------------------------------
+            print(
+                f"Exit code:     "
+                f"{sandbox['exit_code']}"
+            )
+
+        # ====================================================
+        # DOCKER FAILURE
+        # ====================================================
 
         if not result["success"]:
 
@@ -157,9 +179,9 @@ def main():
 
             return 1
 
-        # ----------------------------------------------------
+        # ====================================================
         # APPROVED
-        # ----------------------------------------------------
+        # ====================================================
 
         print("\n✅ SECURITY DECISION")
         print("-" * 40)
@@ -167,11 +189,11 @@ def main():
         print("PACKAGE APPROVED")
 
         print(
-            "\nPyPI verification: PASSED"
+            "\n✓ Package exists on PyPI"
         )
 
         print(
-            "Docker sandbox:    PASSED"
+            "✓ Docker sandbox passed"
         )
 
         print("=" * 60)
@@ -180,6 +202,10 @@ def main():
 
     return 1
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
 
