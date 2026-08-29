@@ -3,20 +3,12 @@ import re
 import requests
 
 
-# ============================================================
-# NORMALIZATION (PEP 503)
-# ============================================================
-
 def normalize_name(package_name: str) -> str:
     """Normalize package names according to PyPI standards (PEP 503)."""
     if not package_name:
         return ""
     return re.sub(r"[-_.]+", "-", package_name.strip().lower())
 
-
-# ============================================================
-# PYPI METADATA FETCHING
-# ============================================================
 
 def fetch_pypi_metadata(package_name: str) -> dict:
     """Check live on PyPI to see if a package exists and fetch metadata."""
@@ -71,14 +63,8 @@ def get_creation_date(metadata: dict | None) -> str | None:
     return min(dates) if dates else None
 
 
-# ============================================================
-# MAIN VERIFICATION FUNCTION
-# ============================================================
-
 def check_pypi_exists(package_name: str) -> dict:
-    """
-    Primary check to determine if a package exists on PyPI.
-    """
+    """Primary check to determine if a package exists on PyPI."""
     normalized = normalize_name(package_name)
 
     if not normalized:
@@ -87,6 +73,7 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": False,
             "status": "blocked",
             "reason": "empty_package_name",
+            "closest_match": None,
             "created": None,
         }
 
@@ -98,6 +85,7 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": None,
             "status": "unknown",
             "reason": "pypi_lookup_failed",
+            "closest_match": None,
             "created": None,
         }
 
@@ -107,6 +95,7 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": False,
             "status": "blocked",
             "reason": "package_not_found",
+            "closest_match": None,
             "created": None,
         }
 
@@ -117,6 +106,7 @@ def check_pypi_exists(package_name: str) -> dict:
         "exists": True,
         "status": "exists",
         "reason": "package_exists",
+        "closest_match": None,
         "created": get_creation_date(metadata),
     }
 
@@ -129,7 +119,7 @@ if __name__ == "__main__":
     ]
 
     print("=" * 60)
-    print("               PYPI CHECK VERIFICATION")
+    print("                PYPI CHECK VERIFICATION")
     print("=" * 60)
 
     for package in test_packages:
