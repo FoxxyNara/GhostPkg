@@ -1,110 +1,144 @@
-import difflib
+import requests
 
-
-# ============================================================
-# TOP 100 PYTHON PACKAGES
-# ============================================================
-# This is NOT a whitelist.
-#
-# It is used only for:
-# - typo detection
-# - similarity detection
-# - "Did you mean?" suggestions
-#
-# A package NOT in this list is still allowed to proceed
-# if it exists on PyPI.
-# ============================================================
-
-TOP_100_PACKAGES = [
-    "requests", "urllib3", "boto3", "botocore", "setuptools", "pip", "wheel",
-    "numpy", "pandas", "scipy", "matplotlib", "scikit-learn", "seaborn",
-    "django", "flask", "fastapi", "starlette", "uvicorn", "gunicorn",
-    "sqlalchemy", "pydantic", "jinja2", "werkzeug", "click", "typer",
-    "pytest", "tox", "nose", "coverage", "mock",
-    "pyyaml", "toml", "python-dotenv", "attrs", "packaging",
-    "certifi", "charset-normalizer", "idna", "six", "python-dateutil",
-    "pytz", "tzdata", "cryptography", "pyjwt", "bcrypt",
-    "pillow", "opencv-python", "imageio", "scikit-image",
-    "beautifulsoup4", "lxml", "html5lib", "soupsieve",
-    "selenium", "playwright", "scrapy",
-    "tensorflow", "torch", "torchvision", "keras", "transformers",
-    "huggingface-hub", "tokenizers", "sentencepiece",
-    "openai", "anthropic", "langchain", "langchain-core",
-    "boto", "azure-storage-blob", "google-cloud-storage",
-    "redis", "pymongo", "psycopg2", "mysqlclient", "sqlite3",
-    "celery", "kombu", "billiard",
-    "gevent", "eventlet", "greenlet",
-    "tqdm", "rich", "colorama", "tabulate",
-    "loguru", "structlog",
-    "pyparsing", "regex", "markupsafe",
-    "protobuf", "grpcio", "googleapis-common-protos",
-    "aiohttp", "httpx", "websockets",
-    "flake8", "black", "isort", "mypy", "pylint",
-    "sphinx", "mkdocs",
-]
+from top_100 import find_closest_match
+from sandbox import test_install_in_sandbox
 
 
 def normalize_name(package_name):
-    """
-    Normalize a Python package name for comparison.
-    """
-
-    return (
-        package_name
-        .strip()
-        .lower()
-        .replace("_", "-")
-    )
+    return package_name.strip().lower().replace("_", "-")
 
 
-def find_closest_match(package_name, cutoff=0.8):
-    """
-    Find the closest Top-100 package name.
+def fetch_pypi_metadata(package_name):
+    """Ask PyPI if this package exists, and get its full data if so."""
+    url = f"https://pypi.org/pypi/{package_name}/json"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return {"status": "found", "metadata": response.json()}
+        if response.status_code == 404:
+            return {"status": "not_found", "metadata": None}
+        return {"status": "error", "metadata": None}
+    except requests.RequestException:
+        return {"status": "error", "metadata": None}
 
-    Returns:
-        package name if a close match exists
-        None otherwise
-    """
 
-    normalized_input = normalize_name(package_name)
-
-    normalized_packages = [
-        normalize_name(package)
-        for package in TOP_100_PACKAGES
-    ]
-
-    matches = difflib.get_close_matches(
-        normalized_input,
-        normalized_packages,
-        n=1,
-        cutoff=cutoff
-    )
-
-    if not matches:
+def get_creation_date(metadata):
+    """Find the earliest upload date across all versions ever published."""
+    if not metadata:
         return None
-
-    closest = matches[0]
-
-    # Don't report the package itself as a typo.
-    if closest == normalized_input:
+    releases = metadata.get("releases", {})
+    dates = []
+    for version_files in releases.values():
+        for file_info in version_files:
+            upload_time = file_info.get("upload_time")
+            if upload_time:
+                dates.append(upload_time)
+    if not dates:
         return None
+    return min(dates)
 
-    return closest
+
+def check_package(package_name):
+    """
+    First security gate.
+    The ONLY blocking condition here is: package does not exist on PyPI.
+    Typo/similarity info is advisory only — shown, but doesn't block.
+    """
+    normalized_name = normalize_name(package_name)
+
+    if not normalized_name:
+        return {
+            "package": package_name,
+            "exists": False,
+            "status": "blocked",
+            "reason": "empty_package_name",
+            "closest_match": None,
+            "created": None,
+        }
+
+    pypi_result = fetch_pypi_metadata(normalized_name)
+    pypi_status = pypi_result["status"]
+    metadata = pypi_result["metadata"]
+
+    if pypi_status == "error":
+        return {
+            "package": package_name,
+            "exists": None,
+            "status": "unknown",
+            "reason": "pypi_lookup_failed",
+            "closest_match": find_closest_match(package_name),
+            "created": None,
+        }
+
+    if pypi_status == "not_found":
+        return {
+            "package": package_name,
+            "exists": False,
+            "status": "blocked",
+            "reason": "package_not_found",
+            "closest_match": find_closest_match(package_name),
+            "created": None,
+        }
+
+    return {
+        "package": package_name,
+        "exists": True,
+        "status": "exists",
+        "reason": "package_exists",
+        "closest_match": find_closest_match(package_name),
+        "created": get_creation_date(metadata),
+    }
+
+
+def run_security_check(package_name):
+    """
+    Full pipeline: PyPI existence check -> Docker sandbox test.
+    Only packages that don't exist on PyPI skip the sandbox entirely.
+    """
+    pypi_result = check_package(package_name)
+
+    if pypi_result["status"] == "unknown":
+        return {
+            "success": False,
+            "stage": "pypi",
+            "package": package_name,
+            "verdict": pypi_result,
+            "sandbox": None,
+            "message": "Unable to verify package existence because PyPI lookup failed.",
+        }
+
+    if not pypi_result["exists"]:
+        return {
+            "success": False,
+            "stage": "pypi",
+            "package": package_name,
+            "verdict": pypi_result,
+            "sandbox": None,
+            "message": "Package does not exist on PyPI.",
+        }
+
+    sandbox_result = test_install_in_sandbox(package_name)
+
+    if not sandbox_result["success"]:
+        return {
+            "success": False,
+            "stage": "sandbox",
+            "package": package_name,
+            "verdict": pypi_result,
+            "sandbox": sandbox_result,
+            "message": "Package failed Docker sandbox testing.",
+        }
+
+    return {
+        "success": True,
+        "stage": "complete",
+        "package": package_name,
+        "verdict": pypi_result,
+        "sandbox": sandbox_result,
+        "message": "Package exists on PyPI and passed Docker sandbox testing.",
+    }
 
 
 if __name__ == "__main__":
-
-    tests = [
-        "requests",
-        "request",
-        "numpyy",
-        "flassk",
-        "random-new-package"
-    ]
-
-    for package in tests:
-
-        print(
-            f"{package:25} -> "
-            f"{find_closest_match(package)}"
-        )
+    for name in ["numpy", "numpyy", "requests-http-parse"]:
+        print(check_package(name))
