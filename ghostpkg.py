@@ -1,11 +1,9 @@
 import argparse
 import sys
-
 from safe_pip import run_security_check
 
 
 def show_result(package_name, result):
-
     verdict = result["verdict"]
 
     print("=" * 60)
@@ -23,54 +21,27 @@ def show_result(package_name, result):
 
     if verdict["exists"] is True:
         print("PyPI:          EXISTS")
-
     elif verdict["exists"] is False:
         print("PyPI:          NOT FOUND")
-
     else:
         print("PyPI:          UNKNOWN")
 
     print(f"Reason:        {verdict['reason']}")
 
-    if verdict.get("closest_match"):
-        print(
-            f"💡 Similar package: "
-            f"'{verdict['closest_match']}'"
-        )
-
     if verdict.get("created"):
-        print(
-            f"First published: "
-            f"{verdict['created']}"
-        )
+        print(f"First published: {verdict['created']}")
 
     # ========================================================
     # PYPI BLOCK
     # ========================================================
 
     if result["stage"] == "pypi":
-
         print("\n🚨 SECURITY DECISION")
         print("-" * 40)
-
         print("🛑 PACKAGE BLOCKED")
-
-        print(
-            f"\nReason: {result['message']}"
-        )
-
-        if verdict.get("closest_match"):
-            print(
-                f"💡 Did you mean "
-                f"'{verdict['closest_match']}'?"
-            )
-
-        print(
-            "\n🐳 Docker chamber: SKIPPED"
-        )
-
+        print(f"\nReason: {result['message']}")
+        print("\n🐳 Docker chamber: SKIPPED")
         print("=" * 60)
-
         return
 
     # ========================================================
@@ -81,54 +52,30 @@ def show_result(package_name, result):
 
     print("\n🧪 DETONATION CHAMBER")
     print("-" * 40)
-
     print("Docker:        ENTERED")
 
     if sandbox:
-
-        print(
-            f"Status:        "
-            f"{sandbox['status']}"
-        )
-
-        print(
-            f"Exit code:     "
-            f"{sandbox['exit_code']}"
-        )
+        print(f"Status:        {sandbox['status']}")
+        print(f"Exit code:     {sandbox['exit_code']}")
 
         if sandbox.get("risk_score") is not None:
-            print(
-                f"Risk score:    "
-                f"{sandbox['risk_score']}/100"
-            )
+            print(f"Risk score:    {sandbox['risk_score']}/100")
 
         if sandbox.get("indicators"):
-
             print("\n⚠️ Indicators:")
-
             for indicator in sandbox["indicators"]:
-                print(
-                    f"  • {indicator}"
-                )
+                print(f"  • {indicator}")
 
     # ========================================================
     # DOCKER FAILURE
     # ========================================================
 
     if not result["success"]:
-
         print("\n🚨 SECURITY DECISION")
         print("-" * 40)
-
         print("🛑 PACKAGE BLOCKED")
-
-        print(
-            f"\nReason: "
-            f"{result['message']}"
-        )
-
+        print(f"\nReason: {result['message']}")
         print("=" * 60)
-
         return
 
     # ========================================================
@@ -137,23 +84,16 @@ def show_result(package_name, result):
 
     print("\n✅ SECURITY DECISION")
     print("-" * 40)
-
     print("PACKAGE APPROVED")
-
     print("\n✓ Package exists on PyPI")
     print("✓ Docker sandbox passed")
-
     print("=" * 60)
 
 
 def main():
-
     parser = argparse.ArgumentParser(
         prog="ghostpkg",
-        description=(
-            "GhostPkg - secure Python "
-            "package verification"
-        ),
+        description="GhostPkg - secure Python package verification",
     )
 
     subparsers = parser.add_subparsers(
@@ -174,21 +114,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == "install":
-
-        result = run_security_check(
-            args.package
-        )
-
-        show_result(
-            args.package,
-            result
-        )
-
-        return (
-            0
-            if result["success"]
-            else 1
-        )
+        result = run_security_check(args.package)
+        show_result(args.package, result)
+        return 0 if result["success"] else 1
 
     return 1
 
