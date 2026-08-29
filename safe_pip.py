@@ -1,52 +1,23 @@
+import json
 import requests
-
-from top_100 import find_closest_match
 from sandbox import test_install_in_sandbox
+from top_100 import find_closest_match, normalize_name
 
 
-# ============================================================
-# PACKAGE NORMALIZATION
-# ============================================================
-
-def normalize_name(package_name):
-    return (
-        package_name
-        .strip()
-        .lower()
-        .replace("_", "-")
-    )
-
-
-# ============================================================
-# PYPI LOOKUP
-# ============================================================
-
-def fetch_pypi_metadata(package_name):
-    """
-    Check whether the requested package exists on PyPI.
-    """
-
-    url = (
-        f"https://pypi.org/pypi/"
-        f"{package_name}/json"
-    )
+def fetch_pypi_metadata(package_name: str) -> dict:
+    """Check whether the requested package exists on PyPI."""
+    url = f"https://pypi.org/pypi/{package_name}/json"
 
     try:
-
-        response = requests.get(
-            url,
-            timeout=5,
-        )
+        response = requests.get(url, timeout=5)
 
         if response.status_code == 200:
-
             return {
                 "status": "found",
                 "metadata": response.json(),
             }
 
         if response.status_code == 404:
-
             return {
                 "status": "not_found",
                 "metadata": None,
@@ -57,45 +28,24 @@ def fetch_pypi_metadata(package_name):
             "metadata": None,
         }
 
-    except requests.RequestException:
-
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
         return {
             "status": "error",
             "metadata": None,
         }
 
 
-# ============================================================
-# CREATION DATE
-# ============================================================
-
-def get_creation_date(metadata):
-    """
-    Find the earliest publication date of the package.
-    """
-
-    if not metadata:
+def get_creation_date(metadata: dict | None) -> str | None:
+    """Find the earliest publication date of the package."""
+    if not metadata or not isinstance(metadata.get("releases"), dict):
         return None
 
-    releases = metadata.get(
-        "releases",
-        {}
-    )
-
     dates = []
-
-    for version_files in releases.values():
-
-        for file_info in version_files:
-
-            upload_time = file_info.get(
-                "upload_time"
-            )
-
-            if upload_time:
-                dates.append(
-                    upload_time
-                )
+    for version_files in metadata["releases"].values():
+        if isinstance(version_files, list):
+            for file_info in version_files:
+                if isinstance(file_info, dict) and file_info.get("upload_time"):
+                    dates.append(file_info["upload_time"])
 
     if not dates:
         return None
@@ -103,40 +53,11 @@ def get_creation_date(metadata):
     return min(dates)
 
 
-# ============================================================
-# PACKAGE VERIFICATION
-# ============================================================
-
-def check_package(package_name):
-    """
-    First security gate.
-
-    Logic:
-
-        Package
-           ↓
-        PyPI lookup
-           ↓
-        ┌───────────────┐
-        │               │
-      EXISTS         NOT FOUND
-        │               │
-        ▼               ▼
-      Docker          BLOCK
-
-    Top-100 similarity is advisory only.
-    """
-
-    normalized = normalize_name(
-        package_name
-    )
-
-    # --------------------------------------------------------
-    # Empty package
-    # --------------------------------------------------------
+def check_package(package_name: str) -> dict:
+    """First security gate: check PyPI availability."""
+    normalized = normalize_name(package_name)
 
     if not normalized:
-
         return {
             "package": package_name,
             "exists": False,
@@ -146,51 +67,27 @@ def check_package(package_name):
             "created": None,
         }
 
-    # --------------------------------------------------------
-    # Query PyPI
-    # --------------------------------------------------------
-
-    pypi_result = fetch_pypi_metadata(
-        normalized
-    )
-
-    # --------------------------------------------------------
-    # PyPI lookup failed
-    # --------------------------------------------------------
+    pypi_result = fetch_pypi_metadata(normalized)
 
     if pypi_result["status"] == "error":
-
         return {
             "package": package_name,
             "exists": None,
             "status": "unknown",
             "reason": "pypi_lookup_failed",
-            "closest_match": find_closest_match(
-                package_name
-            ),
+            "closest_match": find_closest_match(package_name),
             "created": None,
         }
 
-    # --------------------------------------------------------
-    # Package does not exist
-    # --------------------------------------------------------
-
     if pypi_result["status"] == "not_found":
-
         return {
             "package": package_name,
             "exists": False,
             "status": "blocked",
             "reason": "package_not_found",
-            "closest_match": find_closest_match(
-                package_name
-            ),
+            "closest_match": find_closest_match(package_name),
             "created": None,
         }
-
-    # --------------------------------------------------------
-    # Package exists
-    # --------------------------------------------------------
 
     metadata = pypi_result["metadata"]
 
@@ -199,40 +96,16 @@ def check_package(package_name):
         "exists": True,
         "status": "exists",
         "reason": "package_exists",
-        "closest_match": find_closest_match(
-            package_name
-        ),
-        "created": get_creation_date(
-            metadata
-        ),
+        "closest_match": find_closest_match(package_name),
+        "created": get_creation_date(metadata),
     }
 
 
-# ============================================================
-# FULL SECURITY PIPELINE
-# ============================================================
-
-def run_security_check(package_name):
-    """
-    GhostPkg security pipeline:
-
-        1. Check PyPI
-        2. If package doesn't exist → BLOCK
-        3. If package exists → Docker
-        4. Docker PASS → APPROVE
-        5. Docker FAIL → BLOCK
-    """
-
-    verdict = check_package(
-        package_name
-    )
-
-    # --------------------------------------------------------
-    # PyPI lookup failed
-    # --------------------------------------------------------
+def run_security_check(package_name: str) -> dict:
+    """GhostPkg security pipeline execution."""
+    verdict = check_package(package_name)
 
     if verdict["status"] == "unknown":
-
         return {
             "success": False,
             "stage": "pypi",
@@ -240,59 +113,31 @@ def run_security_check(package_name):
             "verdict": verdict,
             "sandbox": None,
             "message": (
-                "Unable to verify package "
-                "existence because the "
-                "PyPI lookup failed."
+                "Unable to verify package existence because the PyPI lookup failed."
             ),
         }
-
-    # --------------------------------------------------------
-    # Package doesn't exist
-    # --------------------------------------------------------
 
     if verdict["exists"] is False:
-
         return {
             "success": False,
             "stage": "pypi",
             "package": package_name,
             "verdict": verdict,
             "sandbox": None,
-            "message": (
-                "Package does not exist "
-                "on PyPI."
-            ),
+            "message": "Package does not exist on PyPI.",
         }
 
-    # --------------------------------------------------------
-    # Package exists → Docker
-    # --------------------------------------------------------
-
-    sandbox_result = test_install_in_sandbox(
-        package_name
-    )
-
-    # --------------------------------------------------------
-    # Docker failed
-    # --------------------------------------------------------
+    sandbox_result = test_install_in_sandbox(package_name)
 
     if not sandbox_result["success"]:
-
         return {
             "success": False,
             "stage": "sandbox",
             "package": package_name,
             "verdict": verdict,
             "sandbox": sandbox_result,
-            "message": (
-                "Package failed Docker "
-                "sandbox testing."
-            ),
+            "message": "Package failed Docker sandbox testing.",
         }
-
-    # --------------------------------------------------------
-    # Everything passed
-    # --------------------------------------------------------
 
     return {
         "success": True,
@@ -300,19 +145,11 @@ def run_security_check(package_name):
         "package": package_name,
         "verdict": verdict,
         "sandbox": sandbox_result,
-        "message": (
-            "Package exists on PyPI and "
-            "passed Docker sandbox testing."
-        ),
+        "message": "Package exists on PyPI and passed Docker sandbox testing.",
     }
 
 
-# ============================================================
-# DIRECT TEST
-# ============================================================
-
 if __name__ == "__main__":
-
     packages = [
         "requests",
         "numpy",
@@ -321,17 +158,7 @@ if __name__ == "__main__":
     ]
 
     for package in packages:
-
-        print(
-            "\n" + "=" * 60
-        )
-
-        print(
-            f"Testing: {package}"
-        )
-
-        result = run_security_check(
-            package
-        )
-
+        print("\n" + "=" * 60)
+        print(f"Testing: {package}")
+        result = run_security_check(package)
         print(result)
