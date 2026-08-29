@@ -73,7 +73,6 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": False,
             "status": "blocked",
             "reason": "empty_package_name",
-            "closest_match": None,
             "created": None,
         }
 
@@ -85,7 +84,6 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": None,
             "status": "unknown",
             "reason": "pypi_lookup_failed",
-            "closest_match": None,
             "created": None,
         }
 
@@ -95,7 +93,6 @@ def check_pypi_exists(package_name: str) -> dict:
             "exists": False,
             "status": "blocked",
             "reason": "package_not_found",
-            "closest_match": None,
             "created": None,
         }
 
@@ -106,7 +103,6 @@ def check_pypi_exists(package_name: str) -> dict:
         "exists": True,
         "status": "exists",
         "reason": "package_exists",
-        "closest_match": None,
         "created": get_creation_date(metadata),
     }
 
