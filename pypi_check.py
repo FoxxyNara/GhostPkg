@@ -1,15 +1,18 @@
 import difflib
-import requests
 
 
 # ============================================================
-# TOP 100 PACKAGES
+# TOP 100 PYTHON PACKAGES
 # ============================================================
-# This list is NOT a whitelist.
-# It is only used for:
+# This is NOT a whitelist.
+#
+# It is used only for:
 # - typo detection
 # - similarity detection
-# - suggesting likely intended packages
+# - "Did you mean?" suggestions
+#
+# A package NOT in this list is still allowed to proceed
+# if it exists on PyPI.
 # ============================================================
 
 TOP_100_PACKAGES = [
@@ -42,95 +45,39 @@ TOP_100_PACKAGES = [
 
 
 def normalize_name(package_name):
-    return package_name.strip().lower().replace("_", "-")
-
-
-# ============================================================
-# PYPI
-# ============================================================
-
-def fetch_pypi_metadata(package_name):
     """
+    Normalize a Python package name for comparison.
+    """
+
+    return (
+        package_name
+        .strip()
+        .lower()
+        .replace("_", "-")
+    )
+
+
+def find_closest_match(package_name, cutoff=0.8):
+    """
+    Find the closest Top-100 package name.
+
     Returns:
-        found     -> package exists
-        not_found -> package does not exist
-        error     -> PyPI could not be reached
+        package name if a close match exists
+        None otherwise
     """
-
-    url = f"https://pypi.org/pypi/{package_name}/json"
-
-    try:
-        response = requests.get(url, timeout=5)
-
-        if response.status_code == 200:
-            return {
-                "status": "found",
-                "metadata": response.json()
-            }
-
-        if response.status_code == 404:
-            return {
-                "status": "not_found",
-                "metadata": None
-            }
-
-        return {
-            "status": "error",
-            "metadata": None
-        }
-
-    except requests.RequestException:
-        return {
-            "status": "error",
-            "metadata": None
-        }
-
-
-# ============================================================
-# CREATION DATE
-# ============================================================
-
-def get_creation_date(metadata):
-
-    if not metadata:
-        return None
-
-    releases = metadata.get("releases", {})
-    dates = []
-
-    for version_files in releases.values():
-
-        for file_info in version_files:
-
-            upload_time = file_info.get("upload_time")
-
-            if upload_time:
-                dates.append(upload_time)
-
-    if not dates:
-        return None
-
-    return min(dates)
-
-
-# ============================================================
-# TOP-100 SIMILARITY
-# ============================================================
-
-def find_closest_match(package_name):
 
     normalized_input = normalize_name(package_name)
 
-    normalized_list = [
-        normalize_name(name)
-        for name in TOP_100_PACKAGES
+    normalized_packages = [
+        normalize_name(package)
+        for package in TOP_100_PACKAGES
     ]
 
     matches = difflib.get_close_matches(
         normalized_input,
-        normalized_list,
+        normalized_packages,
         n=1,
-        cutoff=0.8
+        cutoff=cutoff
     )
 
     if not matches:
@@ -138,102 +85,26 @@ def find_closest_match(package_name):
 
     closest = matches[0]
 
+    # Don't report the package itself as a typo.
     if closest == normalized_input:
         return None
 
     return closest
 
 
-# ============================================================
-# PACKAGE CHECK
-# ============================================================
-
-def check_package(package_name):
-
-    normalized_input = normalize_name(package_name)
-
-    if not normalized_input:
-
-        return {
-            "package": package_name,
-            "pypi_exists": False,
-            "pypi_status": "not_found",
-            "status": "blocked",
-            "reason": "empty_input",
-            "closest_match": None,
-            "created": None,
-        }
-
-    # PyPI
-    pypi_result = fetch_pypi_metadata(normalized_input)
-
-    pypi_status = pypi_result["status"]
-    metadata = pypi_result["metadata"]
-
-    exists = pypi_status == "found"
-
-    # Top-100 similarity
-    closest = find_closest_match(package_name)
-
-    # Creation date
-    created = (
-        get_creation_date(metadata)
-        if exists
-        else None
-    )
-
-    # ========================================================
-    # DECISION
-    # ========================================================
-
-    if pypi_status == "error":
-
-        status = "unknown"
-        reason = "pypi_lookup_failed"
-
-    elif pypi_status == "not_found":
-
-        status = "blocked"
-        reason = "package_not_found"
-
-    else:
-
-        # IMPORTANT:
-        # A similarity match does NOT block the package.
-        if closest:
-
-            status = "suspicious"
-            reason = "possible_typo"
-
-        else:
-
-            status = "safe"
-            reason = "package_exists"
-
-    return {
-        "package": package_name,
-        "pypi_exists": exists,
-        "pypi_status": pypi_status,
-        "status": status,
-        "reason": reason,
-        "closest_match": closest,
-        "created": created,
-    }
-
-
-# ============================================================
-# MANUAL TEST
-# ============================================================
-
 if __name__ == "__main__":
 
-    test_packages = [
+    tests = [
         "requests",
-        "numpy",
+        "request",
         "numpyy",
-        "requests-http-parse"
+        "flassk",
+        "random-new-package"
     ]
 
-    for package in test_packages:
+    for package in tests:
 
-        print(check_package(package))
+        print(
+            f"{package:25} -> "
+            f"{find_closest_match(package)}"
+        )
