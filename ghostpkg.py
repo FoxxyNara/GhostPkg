@@ -12,12 +12,10 @@ def show_result(package_name, result):
     print("                    GHOSTPKG")
     print("=" * 60)
 
-    print(
-        f"\n📦 Package: {package_name}"
-    )
+    print(f"\n📦 Package: {package_name}")
 
     # ========================================================
-    # PYPI
+    # PYPI VERIFICATION
     # ========================================================
 
     print("\n🔍 PYPI VERIFICATION")
@@ -32,9 +30,7 @@ def show_result(package_name, result):
     else:
         print("PyPI:          UNKNOWN")
 
-    print(
-        f"Reason:        {verdict['reason']}"
-    )
+    print(f"Reason:        {verdict['reason']}")
 
     if verdict.get("closest_match"):
         print(
@@ -64,7 +60,6 @@ def show_result(package_name, result):
         )
 
         if verdict.get("closest_match"):
-
             print(
                 f"💡 Did you mean "
                 f"'{verdict['closest_match']}'?"
@@ -79,7 +74,7 @@ def show_result(package_name, result):
         return
 
     # ========================================================
-    # DOCKER
+    # DOCKER DETONATION
     # ========================================================
 
     sandbox = result.get("sandbox")
@@ -102,7 +97,6 @@ def show_result(package_name, result):
         )
 
         if sandbox.get("risk_score") is not None:
-
             print(
                 f"Risk score:    "
                 f"{sandbox['risk_score']}/100"
@@ -146,13 +140,8 @@ def show_result(package_name, result):
 
     print("PACKAGE APPROVED")
 
-    print(
-        "\n✓ Package exists on PyPI"
-    )
-
-    print(
-        "✓ Docker sandbox passed"
-    )
+    print("\n✓ Package exists on PyPI")
+    print("✓ Docker sandbox passed")
 
     print("=" * 60)
 
