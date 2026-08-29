@@ -1,11 +1,26 @@
 import json
+import re
 import requests
 from sandbox import test_install_in_sandbox
-from top_100 import find_closest_match, normalize_name
 
+
+# ============================================================
+# NORMALIZATION (PEP 503)
+# ============================================================
+
+def normalize_name(package_name: str) -> str:
+    """Normalize package names according to PyPI standards (PEP 503)."""
+    if not package_name:
+        return ""
+    return re.sub(r"[-_.]+", "-", package_name.strip().lower())
+
+
+# ============================================================
+# LIVE PYPI CHECK
+# ============================================================
 
 def fetch_pypi_metadata(package_name: str) -> dict:
-    """Check whether the requested package exists on PyPI."""
+    """Check live on PyPI to see if a package exists and fetch metadata."""
     url = f"https://pypi.org/pypi/{package_name}/json"
 
     try:
@@ -47,10 +62,7 @@ def get_creation_date(metadata: dict | None) -> str | None:
                 if isinstance(file_info, dict) and file_info.get("upload_time"):
                     dates.append(file_info["upload_time"])
 
-    if not dates:
-        return None
-
-    return min(dates)
+    return min(dates) if dates else None
 
 
 def check_package(package_name: str) -> dict:
@@ -75,7 +87,7 @@ def check_package(package_name: str) -> dict:
             "exists": None,
             "status": "unknown",
             "reason": "pypi_lookup_failed",
-            "closest_match": find_closest_match(package_name),
+            "closest_match": None,
             "created": None,
         }
 
@@ -85,7 +97,7 @@ def check_package(package_name: str) -> dict:
             "exists": False,
             "status": "blocked",
             "reason": "package_not_found",
-            "closest_match": find_closest_match(package_name),
+            "closest_match": None,
             "created": None,
         }
 
@@ -96,10 +108,14 @@ def check_package(package_name: str) -> dict:
         "exists": True,
         "status": "exists",
         "reason": "package_exists",
-        "closest_match": find_closest_match(package_name),
+        "closest_match": None,
         "created": get_creation_date(metadata),
     }
 
+
+# ============================================================
+# FULL SECURITY PIPELINE
+# ============================================================
 
 def run_security_check(package_name: str) -> dict:
     """GhostPkg security pipeline execution."""
@@ -153,8 +169,7 @@ if __name__ == "__main__":
     packages = [
         "requests",
         "numpy",
-        "numpyy",
-        "requests-http-parse",
+        "this-package-definitely-does-not-exist-12345",
     ]
 
     for package in packages:
