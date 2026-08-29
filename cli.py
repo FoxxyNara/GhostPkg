@@ -1,33 +1,222 @@
-import argparse
+import requests
 
-from pypi_check import check_package
+from top_100 import find_closest_match
 from sandbox import test_install_in_sandbox
 
 
 # ============================================================
-# SECURITY PIPELINE
+# PYPI LOOKUP
+# ============================================================
+
+def fetch_pypi_metadata(package_name):
+    """
+    Query PyPI for the requested package.
+
+    Returns:
+        found      -> package exists
+        not_found  -> package does not exist
+        error      -> PyPI could not be reached
+    """
+
+    url = f"https://pypi.org/pypi/{package_name}/json"
+
+    try:
+
+        response = requests.get(
+            url,
+            timeout=5
+        )
+
+        if response.status_code == 200:
+
+            return {
+                "status": "found",
+                "metadata": response.json()
+            }
+
+        if response.status_code == 404:
+
+            return {
+                "status": "not_found",
+                "metadata": None
+            }
+
+        return {
+            "status": "error",
+            "metadata": None
+        }
+
+    except requests.RequestException:
+
+        return {
+            "status": "error",
+            "metadata": None
+        }
+
+
+# ============================================================
+# CREATION DATE
+# ============================================================
+
+def get_creation_date(metadata):
+
+    if not metadata:
+        return None
+
+    releases = metadata.get(
+        "releases",
+        {}
+    )
+
+    dates = []
+
+    for version_files in releases.values():
+
+        for file_info in version_files:
+
+            upload_time = file_info.get(
+                "upload_time"
+            )
+
+            if upload_time:
+                dates.append(upload_time)
+
+    if not dates:
+        return None
+
+    return min(dates)
+
+
+# ============================================================
+# PACKAGE EXISTENCE CHECK
+# ============================================================
+
+def check_package(package_name):
+    """
+    First security gate.
+
+    The ONLY blocking condition at this stage is:
+        package does not exist on PyPI.
+
+    Top-100 similarity is advisory.
+    """
+
+    normalized_name = (
+        package_name
+        .strip()
+        .lower()
+        .replace("_", "-")
+    )
+
+    if not normalized_name:
+
+        return {
+            "package": package_name,
+            "exists": False,
+            "status": "blocked",
+            "reason": "empty_package_name",
+            "closest_match": None,
+            "created": None,
+        }
+
+    # --------------------------------------------------------
+    # PyPI
+    # --------------------------------------------------------
+
+    pypi_result = fetch_pypi_metadata(
+        normalized_name
+    )
+
+    pypi_status = pypi_result["status"]
+    metadata = pypi_result["metadata"]
+
+    # --------------------------------------------------------
+    # PyPI ERROR
+    # --------------------------------------------------------
+
+    if pypi_status == "error":
+
+        return {
+            "package": package_name,
+            "exists": None,
+            "status": "unknown",
+            "reason": "pypi_lookup_failed",
+            "closest_match": find_closest_match(
+                package_name
+            ),
+            "created": None,
+        }
+
+    # --------------------------------------------------------
+    # PACKAGE DOES NOT EXIST
+    # --------------------------------------------------------
+
+    if pypi_status == "not_found":
+
+        return {
+            "package": package_name,
+            "exists": False,
+            "status": "blocked",
+            "reason": "package_not_found",
+            "closest_match": find_closest_match(
+                package_name
+            ),
+            "created": None,
+        }
+
+    # --------------------------------------------------------
+    # PACKAGE EXISTS
+    # --------------------------------------------------------
+
+    closest = find_closest_match(
+        package_name
+    )
+
+    return {
+        "package": package_name,
+        "exists": True,
+        "status": "exists",
+        "reason": "package_exists",
+        "closest_match": closest,
+        "created": get_creation_date(metadata),
+    }
+
+
+# ============================================================
+# MAIN SECURITY GATEWAY
 # ============================================================
 
 def run_security_check(package_name):
     """
-    GhostPkg security pipeline.
+    GhostPkg's complete package security pipeline.
 
-    1. Check PyPI.
-    2. If package does not exist -> BLOCK.
-    3. If package exists -> Docker.
-    4. Docker failure -> BLOCK.
-    5. Docker success -> APPROVE.
+    PIPELINE:
 
-    Top-100 similarity is advisory only.
+        PyPI existence
+              ↓
+        Does not exist → BLOCK
+              ↓
+            Exists
+              ↓
+          Docker
+          /    \
+       FAIL    PASS
+        ↓        ↓
+      BLOCK    APPROVE
     """
 
-    # --------------------------------------------------------
-    # PYPI
-    # --------------------------------------------------------
+    # ========================================================
+    # STAGE 1 — PYPI
+    # ========================================================
 
-    pypi_result = check_package(package_name)
+    pypi_result = check_package(
+        package_name
+    )
 
+    # --------------------------------------------------------
     # PyPI lookup failed
+    # --------------------------------------------------------
+
     if pypi_result["status"] == "unknown":
 
         return {
@@ -36,14 +225,17 @@ def run_security_check(package_name):
             "package": package_name,
             "verdict": pypi_result,
             "sandbox": None,
-            "message": "PyPI lookup failed."
+            "message": (
+                "Unable to verify package existence "
+                "because PyPI lookup failed."
+            )
         }
 
     # --------------------------------------------------------
-    # PACKAGE DOES NOT EXIST
+    # Package does not exist
     # --------------------------------------------------------
 
-    if not pypi_result["pypi_exists"]:
+    if not pypi_result["exists"]:
 
         return {
             "success": False,
@@ -56,18 +248,16 @@ def run_security_check(package_name):
             )
         }
 
-    # --------------------------------------------------------
-    # PACKAGE EXISTS
-    # --------------------------------------------------------
-    # Even if suspicious, it enters Docker.
-    # --------------------------------------------------------
+    # ========================================================
+    # STAGE 2 — DOCKER
+    # ========================================================
 
     sandbox_result = test_install_in_sandbox(
         package_name
     )
 
     # --------------------------------------------------------
-    # DOCKER FAILURE
+    # Docker failed
     # --------------------------------------------------------
 
     if not sandbox_result["success"]:
@@ -83,9 +273,9 @@ def run_security_check(package_name):
             )
         }
 
-    # --------------------------------------------------------
-    # SUCCESS
-    # --------------------------------------------------------
+    # ========================================================
+    # STAGE 3 — APPROVED
+    # ========================================================
 
     return {
         "success": True,
@@ -94,17 +284,17 @@ def run_security_check(package_name):
         "verdict": pypi_result,
         "sandbox": sandbox_result,
         "message": (
-            "Package passed PyPI verification "
-            "and Docker sandbox testing."
+            "Package exists on PyPI and passed "
+            "Docker sandbox testing."
         )
     }
 
 
 # ============================================================
-# CLI OUTPUT
+# COMMAND LINE INTERFACE
 # ============================================================
 
-def show_result(package_name):
+def install(package_name):
 
     print("=" * 60)
     print("              GHOSTPKG SAFE-PIP")
@@ -121,22 +311,16 @@ def show_result(package_name):
     print("\n🔍 PYPI PACKAGE CHECK")
     print("-" * 40)
 
-    verdict = check_package(package_name)
+    verdict = check_package(
+        package_name
+    )
 
     print(
         f"Package:       {verdict['package']}"
     )
 
     print(
-        f"PyPI status:   {verdict['pypi_status']}"
-    )
-
-    print(
-        f"PyPI exists:   {verdict['pypi_exists']}"
-    )
-
-    print(
-        f"Status:        {verdict['status']}"
+        f"PyPI exists:   {verdict['exists']}"
     )
 
     print(
@@ -147,7 +331,7 @@ def show_result(package_name):
         f"Closest match: {verdict['closest_match']}"
     )
 
-    if verdict.get("created"):
+    if verdict["created"]:
 
         print(
             f"First published: {verdict['created']}"
@@ -163,7 +347,8 @@ def show_result(package_name):
         print("-" * 40)
 
         print(
-            "Could not determine whether the package exists."
+            "Could not determine whether "
+            "the package exists."
         )
 
         print("=" * 60)
@@ -171,10 +356,10 @@ def show_result(package_name):
         return False
 
     # ========================================================
-    # PACKAGE DOES NOT EXIST
+    # DOES NOT EXIST
     # ========================================================
 
-    if not verdict["pypi_exists"]:
+    if not verdict["exists"]:
 
         print("\n🚨 FINAL VERDICT")
         print("-" * 40)
@@ -186,7 +371,7 @@ def show_result(package_name):
             "does not exist on PyPI."
         )
 
-        if verdict.get("closest_match"):
+        if verdict["closest_match"]:
 
             print(
                 f"💡 Did you mean "
@@ -198,32 +383,28 @@ def show_result(package_name):
         return False
 
     # ========================================================
-    # PACKAGE EXISTS
+    # EXISTS
     # ========================================================
 
     print("\n✅ PACKAGE EXISTS ON PYPI")
     print("-" * 40)
 
-    if verdict["status"] == "suspicious":
+    if verdict["closest_match"]:
 
         print(
-            f"⚠️ Similar to known package: "
+            f"⚠️ Similar to: "
             f"'{verdict['closest_match']}'"
         )
 
         print(
-            "Advisory warning only."
+            "Similarity warning is advisory only."
         )
 
     else:
 
         print(
-            "Package exists on PyPI."
+            "Package passed the existence check."
         )
-
-    print(
-        "\nProceeding to Docker detonation..."
-    )
 
     # ========================================================
     # DOCKER
@@ -232,12 +413,16 @@ def show_result(package_name):
     print("\n🧪 DETONATION CHAMBER")
     print("-" * 40)
 
+    print(
+        "Package exists → entering Docker sandbox..."
+    )
+
     sandbox_result = test_install_in_sandbox(
         package_name
     )
 
     print(
-        f"Status:    {sandbox_result['status']}"
+        f"\nStatus:    {sandbox_result['status']}"
     )
 
     print(
@@ -255,7 +440,7 @@ def show_result(package_name):
         print(sandbox_result["stderr"])
 
     # ========================================================
-    # DOCKER FAILURE
+    # DOCKER FAILED
     # ========================================================
 
     if not sandbox_result["success"]:
@@ -263,10 +448,10 @@ def show_result(package_name):
         print("\n🚨 FINAL VERDICT")
         print("-" * 40)
 
-        print("🛑 SANDBOX FAILED")
+        print("🛑 BLOCKED")
 
         print(
-            f"\n'{package_name}' failed "
+            f"'{package_name}' failed "
             "Docker sandbox testing."
         )
 
@@ -291,46 +476,3 @@ def show_result(package_name):
     print("=" * 60)
 
     return True
-
-
-# ============================================================
-# COMMAND LINE INTERFACE
-# ============================================================
-
-def main():
-
-    parser = argparse.ArgumentParser(
-        prog="safe-pip",
-        description="GhostPkg secure Python package gateway"
-    )
-
-    subparsers = parser.add_subparsers(
-        dest="command",
-        required=True
-    )
-
-    install_parser = subparsers.add_parser(
-        "install",
-        help="Check and sandbox a package"
-    )
-
-    install_parser.add_argument(
-        "package",
-        help="Package name"
-    )
-
-    args = parser.parse_args()
-
-    if args.command == "install":
-
-        success = show_result(
-            args.package
-        )
-
-        return 0 if success else 1
-
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
