@@ -1,0 +1,11 @@
+cli.py
+pypi_check.py
+sandbox.py
+setup.py
+static_scan.py
+ghostpkg.egg-info/PKG-INFO
+ghostpkg.egg-info/SOURCES.txt
+ghostpkg.egg-info/dependency_links.txt
+ghostpkg.egg-info/entry_points.txt
+ghostpkg.egg-info/requires.txt
+ghostpkg.egg-info/top_level.txt
