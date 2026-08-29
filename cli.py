@@ -3,6 +3,42 @@ import argparse
 from pypi_check import check_package
 from sandbox import test_install_in_sandbox
 
+def run_security_check(package_name):
+    """
+    Run GhostPkg's complete security pipeline and return
+    a structured result for other components such as the AI agent.
+    """
+
+    static_result = check_package(package_name)
+
+    # Static block
+    if static_result["status"] in ("blocked", "suspicious"):
+        return {
+            "success": False,
+            "stage": "static",
+            "package": package_name,
+            "verdict": static_result,
+        }
+
+    # Docker detonation
+    sandbox_result = test_install_in_sandbox(package_name)
+
+    if not sandbox_result["success"]:
+        return {
+            "success": False,
+            "stage": "sandbox",
+            "package": package_name,
+            "verdict": static_result,
+            "sandbox": sandbox_result,
+        }
+
+    return {
+        "success": True,
+        "stage": "complete",
+        "package": package_name,
+        "verdict": static_result,
+        "sandbox": sandbox_result,
+    }
 
 def show_result(package_name):
 
