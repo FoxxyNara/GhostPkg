@@ -1,6 +1,6 @@
 import argparse
 
-from safe_pip import run_security_check
+from pypi_check import run_security_check
 
 
 # ============================================================
