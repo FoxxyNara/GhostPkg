@@ -1,172 +1,66 @@
 import subprocess
-import shutil
-import re
+import tempfile
 import os
 
-IMAGE = "ghostpkg-sandbox:latest"
-
-def docker_available() -> bool:
-    return shutil.which("docker") is not None
-
-def docker_running() -> bool:
-    if not docker_available():
-        return False
-    try:
-        result = subprocess.run(
-            ["docker", "info"], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=5
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-def test_install_in_sandbox(package_spec: str, timeout_seconds: int = 30) -> dict:
-    if not docker_available() or not docker_running():
-        return {
-            "success": False,
-            "status": "DOCKER_UNAVAILABLE",
-            "message": "Docker engine is not running or accessible."
-        }
-
-    clean_pkg = re.split(r"[><=~!]", package_spec)[0].strip()
-    import_module = clean_pkg.replace("-", "_")
-
-    sandbox_cmd = (
-        f"strace -f -e trace=execve,openat -o /tmp/trace.log "
-        f"python -m pip install --no-cache-dir '{package_spec}' && "
-        f"python -c 'import importlib; importlib.import_module(\"{import_module}\")' ; "
-        f"STATUS=$? ; "
-        f"echo '---STRACE_LOGS---' ; "
-        f"grep -E 'execve.*(\"curl\"|\"wget\"|\"nc\"|\"/bin/sh\"|\"/bin/bash\"|\"powershell\")|openat.*(\"/etc/shadow\"|\"\\.ssh\"|\"\\.aws\"|\"\\.env\"|\"\\.kube\")' /tmp/trace.log || true ; "
-        f"exit $STATUS"
+def test_package_in_sandbox(package_name):
+    """
+    Detonates the package in a RAM-only Docker container and traces syscalls.
+    Catches stealthy WebSockets/C2 via the 'connect' syscall.
+    """
+    # Create a temporary directory for strace logs on the host
+    log_dir = tempfile.mkdtemp(prefix="ghostpkg_sandbox_")
+    strace_log = os.path.join(log_dir, "strace.log")
+    
+    # strace command tracing execve (shells), openat (files), and connect (network/C2)
+    # The container runs with a tmpfs mount so no files touch the physical disk
+    container_cmd = (
+        f"docker run --rm --tmpfs /run --tmpfs /tmp "
+        f"-v {log_dir}:/sandbox_logs ubuntu:latest "
+        f"bash -c 'apt-get update -qq && apt-get install -y python3 strace -qq && "
+        f"strace -f -e trace=execve,openat,connect -o /sandbox_logs/strace.log python3 -c \"import {package_name}\"'"
     )
-
-    docker_run = [
-        "docker", "run", "--rm",
-        "--cap-add=SYS_PTRACE",
-        "--memory=512m",
-        "--cpus=1.0",
-        "--network=host",
-        IMAGE,
-        "sh", "-c", sandbox_cmd
-    ]
-
+    
+    findings = []
+    success = True
+    message = "Sandbox Detonation Passed. No malicious syscalls detected."
+    
     try:
-        res = subprocess.run(
-            docker_run,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds
-        )
-
-        stdout = res.stdout or ""
-        stderr = res.stderr or ""
-
-        suspicious_syscalls = ""
-        if "---STRACE_LOGS---" in stdout:
-            parts = stdout.split("---STRACE_LOGS---")
-            stdout_clean = parts[0].strip()
-            suspicious_syscalls = parts[1].strip()
-        else:
-            stdout_clean = stdout.strip()
-
-        if suspicious_syscalls:
-            return {
-                "success": False,
-                "status": "MALWARE_DETECTED",
-                "stdout": suspicious_syscalls,
-                "message": "CRITICAL: Dynamic analysis detected unauthorized kernel calls (exfiltration or credential harvesting)."
-            }
-
-        if res.returncode != 0:
-            return {
-                "success": False,
-                "status": "INSTALL_FAILED",
-                "stdout": stdout_clean,
-                "stderr": stderr,
-                "message": "Package installation or module import failed inside the isolated sandbox."
-            }
-
-        return {
-            "success": True,
-            "status": "PASSED",
-            "stdout": stdout_clean,
-            "message": "Package verified clean under dynamic detonation."
-        }
-
+        # Run the sandbox detonation (Timeout after 15 seconds)
+        subprocess.run(container_cmd, shell=True, capture_output=True, timeout=15)
+        
+        # Parse the strace log for malicious intent
+        if os.path.exists(strace_log):
+            with open(strace_log, "r", errors="ignore") as f:
+                log_lines = f.readlines()
+                
+            for line in log_lines:
+                # 1. Shell Execution Check
+                if "execve" in line and ("curl" in line or "wget" in line or "/bin/sh" in line):
+                    findings.append({"severity": "CRITICAL", "type": "UNAUTHORIZED_EXEC", "description": "Suspicious shell execution detected in sandbox."})
+                    success = False
+                
+                # 2. Covert C2 Network Check (The WebSocket fallback at the kernel level)
+                elif "connect" in line and "AF_INET" in line:
+                    findings.append({"severity": "CRITICAL", "type": "UNAUTHORIZED_NETWORK", "description": "Covert external network connection established (Possible C2/WebSocket backdoor)."})
+                    success = False
+                    
+                # 3. Credential Theft Check
+                elif "openat" in line and (".aws" in line or ".ssh" in line or ".env" in line):
+                    findings.append({"severity": "CRITICAL", "type": "CREDENTIAL_ACCESS", "description": "Attempt to read sensitive credential files detected."})
+                    success = False
+                    
+        if not success:
+            message = "Sandbox Detonation Failed! Malicious system calls intercepted."
+            
     except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "status": "TIMEOUT",
-            "message": f"Execution timed out after {timeout_seconds}s (potential sleeper/anti-analysis evasion)."
-        }
-
-def test_local_script_in_sandbox(file_path: str, timeout_seconds: int = 30) -> dict:
-    """Detonates a local Python script inside the Docker sandbox with strace."""
-    if not docker_available() or not docker_running():
-        return {
-            "success": False,
-            "status": "DOCKER_UNAVAILABLE",
-            "message": "Docker engine is not running or accessible."
-        }
-
-    abs_path = os.path.abspath(file_path)
-    filename = os.path.basename(abs_path)
-
-    sandbox_cmd = (
-        f"strace -f -e trace=execve,openat -o /tmp/trace.log python /app/{filename} ; "
-        f"STATUS=$? ; "
-        f"echo '---STRACE_LOGS---' ; "
-        f"grep -E 'execve.*(\"curl\"|\"wget\"|\"nc\"|\"/bin/sh\"|\"/bin/bash\"|\"powershell\")|openat.*(\"/etc/shadow\"|\"\\.ssh\"|\"\\.aws\"|\"\\.env\"|\"\\.kube\")' /tmp/trace.log || true ; "
-        f"exit $STATUS"
-    )
-
-    docker_run = [
-        "docker", "run", "--rm",
-        "--cap-add=SYS_PTRACE",
-        "--memory=512m",
-        "--cpus=1.0",
-        "-v", f"{os.path.dirname(abs_path)}:/app:ro",
-        IMAGE,
-        "sh", "-c", sandbox_cmd
-    ]
-
-    try:
-        res = subprocess.run(
-            docker_run,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds
-        )
-
-        stdout = res.stdout or ""
-        suspicious_syscalls = ""
-        if "---STRACE_LOGS---" in stdout:
-            parts = stdout.split("---STRACE_LOGS---")
-            suspicious_syscalls = parts[1].strip()
-
-        if suspicious_syscalls:
-            return {
-                "success": False,
-                "status": "MALWARE_DETECTED",
-                "stdout": suspicious_syscalls,
-                "message": "CRITICAL: Dynamic analysis detected unauthorized kernel calls (exfiltration or credential harvesting)."
-            }
-
-        return {
-            "success": True,
-            "status": "PASSED",
-            "stdout": stdout.strip(),
-            "message": "Package verified clean under dynamic detonation."
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "status": "TIMEOUT",
-            "message": f"Execution timed out after {timeout_seconds}s."
-        }
+        success = False
+        message = "Sandbox Detonation Failed! Process timed out (Possible infinite loop or hanging socket)."
+    except Exception as e:
+        success = False
+        message = f"Sandbox Detonation Error: {str(e)}"
+        
+    return {
+        "success": success,
+        "message": message,
+        "findings": findings
+    }

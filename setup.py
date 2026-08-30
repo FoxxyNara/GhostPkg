@@ -6,7 +6,7 @@ setup(
     description="Zero-Trust AI Dependency Firewall and Slopsquatting Protector",
     author="Sharveel Kiran Awari",
     packages=find_packages(where="."),
-    py_modules=["cli", "pypi_check", "sandbox", "static_scan"],
+    py_modules=["cli", "pypi_check", "sandbox", "static_scan", "agent_adapter", "intent_check"],
     install_requires=[
         "requests",
     ],

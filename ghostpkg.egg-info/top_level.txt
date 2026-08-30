@@ -1,4 +1,6 @@
+agent_adapter
 cli
+intent_check
 pypi_check
 sandbox
 static_scan

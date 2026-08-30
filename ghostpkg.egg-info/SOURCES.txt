@@ -1,4 +1,7 @@
+README.md
+agent_adapter.py
 cli.py
+intent_check.py
 pypi_check.py
 sandbox.py
 setup.py
