@@ -1,6 +1,7 @@
 import subprocess
 import shutil
 import re
+import os
 
 IMAGE = "ghostpkg-sandbox:latest"
 
@@ -100,4 +101,72 @@ def test_install_in_sandbox(package_spec: str, timeout_seconds: int = 30) -> dic
             "success": False,
             "status": "TIMEOUT",
             "message": f"Execution timed out after {timeout_seconds}s (potential sleeper/anti-analysis evasion)."
+        }
+
+def test_local_script_in_sandbox(file_path: str, timeout_seconds: int = 30) -> dict:
+    """Detonates a local Python script inside the Docker sandbox with strace."""
+    if not docker_available() or not docker_running():
+        return {
+            "success": False,
+            "status": "DOCKER_UNAVAILABLE",
+            "message": "Docker engine is not running or accessible."
+        }
+
+    abs_path = os.path.abspath(file_path)
+    filename = os.path.basename(abs_path)
+
+    sandbox_cmd = (
+        f"strace -f -e trace=execve,openat -o /tmp/trace.log python /app/{filename} ; "
+        f"STATUS=$? ; "
+        f"echo '---STRACE_LOGS---' ; "
+        f"grep -E 'execve.*(\"curl\"|\"wget\"|\"nc\"|\"/bin/sh\"|\"/bin/bash\"|\"powershell\")|openat.*(\"/etc/shadow\"|\"\\.ssh\"|\"\\.aws\"|\"\\.env\"|\"\\.kube\")' /tmp/trace.log || true ; "
+        f"exit $STATUS"
+    )
+
+    docker_run = [
+        "docker", "run", "--rm",
+        "--cap-add=SYS_PTRACE",
+        "--memory=512m",
+        "--cpus=1.0",
+        "-v", f"{os.path.dirname(abs_path)}:/app:ro",
+        IMAGE,
+        "sh", "-c", sandbox_cmd
+    ]
+
+    try:
+        res = subprocess.run(
+            docker_run,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds
+        )
+
+        stdout = res.stdout or ""
+        suspicious_syscalls = ""
+        if "---STRACE_LOGS---" in stdout:
+            parts = stdout.split("---STRACE_LOGS---")
+            suspicious_syscalls = parts[1].strip()
+
+        if suspicious_syscalls:
+            return {
+                "success": False,
+                "status": "MALWARE_DETECTED",
+                "stdout": suspicious_syscalls,
+                "message": "CRITICAL: Dynamic analysis detected unauthorized kernel calls (exfiltration or credential harvesting)."
+            }
+
+        return {
+            "success": True,
+            "status": "PASSED",
+            "stdout": stdout.strip(),
+            "message": "Package verified clean under dynamic detonation."
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "status": "TIMEOUT",
+            "message": f"Execution timed out after {timeout_seconds}s."
         }
