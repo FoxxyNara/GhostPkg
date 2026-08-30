@@ -4,26 +4,23 @@ import os
 import subprocess
 import sys
 
+# Force the Python path to recognize the current directory first
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+import static_scan
+
 try:
     from pypi_check import run_security_check  # type: ignore[import-not-found]
 except ImportError:
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-    try:
-        from pypi_check import run_security_check  # type: ignore[import-not-found]
-    except ImportError:
-        def run_security_check(*args, **kwargs):
-            raise ModuleNotFoundError(
-                "pypi_check is not available. Ensure it is installed or placed beside cli.py."
-            )
-
+    def run_security_check(*args, **kwargs):
+        raise ModuleNotFoundError(
+            "pypi_check is not available. Ensure it is installed or placed beside cli.py."
+        )
 
 def install_on_host(package_name, silent=False):
-    """
-    Executes native pip install on the host machine.
-    In silent mode (agent mode), suppresses stdout so JSON parsing is not corrupted.
-    """
+    """Executes native pip install on the host machine."""
     if not silent:
         print(f"\n[GhostPkg] Verification complete. Routing '{package_name}' to native system pip...")
 
@@ -45,13 +42,12 @@ def install_on_host(package_name, silent=False):
             print(f"\n❌ ERROR: System pip failed to install '{package_name}'.")
         return False
 
-
 def show_result(package_name, result):
     verdict = result.get("verdict", {})
     print(f"\n📦 Package: {package_name}")
 
     if verdict.get("exists") is True:
-        print("PyPI: EXISTS")
+        print("PyPI: EXISTS (or Bypassed for Local File)")
     elif verdict.get("exists") is False:
         print("PyPI: NOT FOUND (Hallucination Detected)")
     else:
@@ -62,9 +58,10 @@ def show_result(package_name, result):
 
     scan = result.get("scan")
     if scan and scan.get("findings"):
-        print("\n⚠ Static scan findings:")
+        print("\n🚨 CRITICAL AST VIOLATIONS DETECTED:")
         for path, patterns in scan["findings"]:
-            print(f"  {path}: {patterns}")
+            for issue in patterns:
+                print(f"  ❌ [{path}] -> {issue}")
 
     sandbox = result.get("sandbox")
     if sandbox:
@@ -83,7 +80,6 @@ def show_result(package_name, result):
         print("\n🛑 STATUS: BLOCKED (Installation Halted)")
         sys.exit(1)
 
-
 def main():
     parser = argparse.ArgumentParser(prog="ghostpkg", description="Zero-Trust AI Dependency Firewall")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -91,11 +87,48 @@ def main():
     install_parser = subparsers.add_parser("install", help="Check and safely install a package")
     install_parser.add_argument("package", help="Package name to install")
     install_parser.add_argument("--json", action="store_true", help="Output strict JSON for Agent integration")
+    install_parser.add_argument("--local", action="store_true", help="Bypass PyPI triage and scan a local file directly")
 
     args = parser.parse_args()
 
     if args.command == "install":
-        result = run_security_check(args.package)
+        if args.local:
+            print(f"\n[GhostPkg] 🔍 LOCAL MODE: Bypassing PyPI triage for '{args.package}'...")
+            
+            try:
+                # utf-8-sig ensures hidden PowerShell BOM characters are stripped
+                with open(args.package, "r", encoding="utf-8-sig") as f:
+                    code_content = f.read()
+            except FileNotFoundError:
+                print(f"\n❌ ERROR: Could not find local file '{args.package}'")
+                sys.exit(1)
+                
+            issues = static_scan.analyze_python_source(code_content)
+            
+            if issues:
+                result = {
+                    "success": False,
+                    "stage": "static_scan",
+                    "message": "Execution Blocked by Tier 2 Defense!",
+                    "verdict": {"exists": True},
+                    "scan": {"findings": [(args.package, issues)]},
+                    "sandbox": None
+                }
+            else:
+                print("[GhostPkg] Tier 2 Static AST scan passed. Escalating to Tier 3 Docker Sandbox...")
+                import sandbox
+                sandbox_result = sandbox.test_local_script_in_sandbox(args.package)
+                
+                result = {
+                    "success": sandbox_result.get("success", False),
+                    "stage": "sandbox",
+                    "message": sandbox_result.get("message"),
+                    "verdict": {"exists": True},
+                    "scan": {"findings": []},
+                    "sandbox": sandbox_result
+                }
+        else:
+            result = run_security_check(args.package)
 
         if args.json:
             if not result.get("success") and result.get("verdict", {}).get("closest_match"):
@@ -103,19 +136,10 @@ def main():
                 result["remediation_command"] = f"ghostpkg install {result['verdict']['closest_match']}"
             else:
                 result["action_required"] = "NONE"
-
-            if result.get("success"):
-                host_ok = install_on_host(args.package, silent=True)
-                if not host_ok:
-                    result["success"] = False
-                    result["stage"] = "host_install"
-                    result["message"] = f"Failed to install '{args.package}' via native pip."
-
             print(json.dumps(result))
             sys.exit(0 if result.get("success") else 1)
 
         show_result(args.package, result)
-
 
 if __name__ == "__main__":
     main()
