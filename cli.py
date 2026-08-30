@@ -35,16 +35,44 @@ def main():
         # EXECUTE THE PIPELINE
         # ---------------------------------------------------------
         if args.local:
-            # If installing a local package/repo, skip Tier 1 triage
-            # For the DevJams demo, this immediately triggers a Tier 2/3 block against your c2_malware.py
-            result = {
-                "success": False,
-                "stage": "static_scan",
-                "message": "Execution Blocked by Tier 2 AST Defense! Covert C2 WebSocket detected.",
-                "verdict": {"exists": True, "closest_match": None},
-                "scan": {"findings": [{"type": "COVERT_C2_CHANNEL", "severity": "CRITICAL"}]},
-                "sandbox": None
-            }
+            import static_scan
+            import sandbox
+
+            # Step 1: Run Tier 2 AST Scan
+            scan_res = static_scan.scan_file(package_name)
+            
+            if scan_res and scan_res.get("findings"):
+                result = {
+                    "success": False,
+                    "stage": "static_scan",
+                    "message": "Execution Blocked by Tier 2 AST Defense! Threat pattern detected.",
+                    "verdict": {"exists": True, "closest_match": None},
+                    "scan": scan_res,
+                    "sandbox": None
+                }
+            else:
+                # Step 2: Tier 2 Passed -> Run Tier 3 Dynamic Sandbox
+                # Replace line 55 in cli.py:
+                sandbox_res = sandbox.test_package_in_sandbox(package_name)
+                
+                if sandbox_res and not sandbox_res.get("success", True):
+                    result = {
+                        "success": False,
+                        "stage": "sandbox",
+                        "message": "Execution Blocked by Tier 3 Sandbox Defense! Suspicious runtime activity detected.",
+                        "verdict": {"exists": True, "closest_match": None},
+                        "scan": scan_res,
+                        "sandbox": sandbox_res
+                    }
+                else:
+                    result = {
+                        "success": True,
+                        "stage": "passed",
+                        "message": "Package verified clean across all defense tiers.",
+                        "verdict": {"exists": True, "closest_match": None},
+                        "scan": scan_res,
+                        "sandbox": sandbox_res
+                    }
         else:
             # Normal Agent Workflow: Run the full 3-Tier PyPI Pipeline
             result = pypi_check.run_security_check(package_name)
