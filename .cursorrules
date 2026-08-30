@@ -54,3 +54,27 @@ CORRECTION: Package 'fake_malware/sandbox_malware.py' exhibited malicious behavi
 # [GhostPkg Auto-Immunization | 2026-08-31 02:44:43]
 CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/sandbox_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
 CORRECTION: Package 'fake_malware/sandbox_malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 3 Sandbox Defense! Suspicious runtime activity detected.). Never attempt to install or import this dependency.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:50:39]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/ast_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: This package does not exist on PyPI. DO NOT retry. Pivot to using Python standard libraries (e.g., urllib, json) or write custom code.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:51:07]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/c2_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: Package 'fake_malware/c2_malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 2 AST Defense! Threat pattern detected.). Never attempt to install or import this dependency.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:52:21]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/sandbox_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: Package 'fake_malware/sandbox_malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 3 Sandbox Defense! Suspicious runtime activity detected.). Never attempt to install or import this dependency.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:52:52]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/c2_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: Package 'fake_malware/c2_malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 2 AST Defense! Threat pattern detected.). Never attempt to install or import this dependency.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:53:10]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/c2_malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: Package 'fake_malware/c2_malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 2 AST Defense! Threat pattern detected.). Never attempt to install or import this dependency.
+
+# [GhostPkg Auto-Immunization | 2026-08-31 02:53:51]
+CRITICAL SECURITY RULE: You previously attempted to install package 'fake_malware/malware.py'. This operation was intercepted and BLOCKED by the GhostPkg Firewall.
+CORRECTION: Package 'fake_malware/malware.py' exhibited malicious behavior (Reason: Execution Blocked by Tier 3 Sandbox Defense! Suspicious runtime activity detected.). Never attempt to install or import this dependency.
