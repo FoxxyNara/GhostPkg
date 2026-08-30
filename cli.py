@@ -42,7 +42,7 @@ def install_on_host(package_name, silent=False):
             print(f"\n❌ ERROR: System pip failed to install '{package_name}'.")
         return False
 
-def show_result(package_name, result):
+def show_result(package_name, result, is_local=False):
     verdict = result.get("verdict", {})
     print(f"\n📦 Package: {package_name}")
 
@@ -74,8 +74,11 @@ def show_result(package_name, result):
 
     if result.get("success"):
         print("\n🛡️ STATUS: APPROVED (Checks Passed)")
-        if not install_on_host(package_name, silent=False):
-            sys.exit(1)
+        if is_local:
+            print(f"\n✅ Local audit complete: '{package_name}' is verified clean and safe to execute.")
+        else:
+            if not install_on_host(package_name, silent=False):
+                sys.exit(1)
     else:
         print("\n🛑 STATUS: BLOCKED (Installation Halted)")
         sys.exit(1)
@@ -139,7 +142,7 @@ def main():
             print(json.dumps(result))
             sys.exit(0 if result.get("success") else 1)
 
-        show_result(args.package, result)
+        show_result(args.package, result, is_local=args.local)
 
 if __name__ == "__main__":
     main()
